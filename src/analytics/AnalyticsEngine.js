@@ -7,25 +7,75 @@ export class AnalyticsEngine {
     return {
       concerts: new Set(this.records.map((record) => record.gigId)).size,
       performances: this.records.length,
-      songs: new Set(this.records.map((record) => record.songTitle.toLowerCase())).size,
+      songs: new Set(
+        this.records
+          .map((record) => (record.songTitle || "").toLowerCase())
+          .filter(Boolean)
+      ).size,
     };
   }
 
   songPlayCounts() {
     const counts = new Map();
-    this.records.forEach((record) => {
+
+    if (!this.records.length) return [];
+
+    const validRecords = this.records.filter(
+      (record) => record.songTitle && record.gigDate
+    );
+
+    if (!validRecords.length) return [];
+
+    const latestDate = validRecords.reduce(
+      (latest, record) => (record.gigDate > latest ? record.gigDate : latest),
+      ""
+    );
+
+    const cutoff = new Date(`${latestDate}T00:00:00`);
+    cutoff.setDate(cutoff.getDate() - 90);
+
+    validRecords.forEach((record) => {
       const key = record.songTitle.toLowerCase();
-      const current = counts.get(key) || { title: record.songTitle, artist: record.songArtist, count: 0 };
+
+      const current = counts.get(key) || {
+        title: record.songTitle,
+        artist: record.songArtist || "Unknown",
+        count: 0,
+        lastPlayed: record.gigDate,
+      };
+
       current.count += 1;
+
+      if (!current.lastPlayed || record.gigDate > current.lastPlayed) {
+        current.lastPlayed = record.gigDate;
+      }
+
       counts.set(key, current);
     });
-    return [...counts.values()].sort((a, b) => b.count - a.count || a.title.localeCompare(b.title));
+
+    return [...counts.values()]
+      .map((song) => ({
+        ...song,
+        rotationStatus:
+          new Date(`${song.lastPlayed}T00:00:00`) < cutoff ? "Stale" : "Active",
+      }))
+      .sort((a, b) => b.count - a.count || a.title.localeCompare(b.title));
   }
 
   classificationBreakdown() {
     const counts = { original: 0, cover: 0, unknown: 0 };
-    this.records.forEach((record) => { counts[record.classification] += 1; });
+
+    this.records.forEach((record) => {
+      const classification = record.classification || "unknown";
+      if (classification in counts) {
+        counts[classification] += 1;
+      } else {
+        counts.unknown += 1;
+      }
+    });
+
     const total = this.records.length || 1;
+
     return Object.entries(counts).map(([name, count]) => ({
       name,
       count,
@@ -35,58 +85,83 @@ export class AnalyticsEngine {
 
   performancesByMonth() {
     const counts = new Map();
+
     this.records.forEach((record) => {
+      if (!record.gigDate) return;
       const month = record.gigDate.slice(0, 7);
       counts.set(month, (counts.get(month) || 0) + 1);
     });
-    return [...counts.entries()].sort().map(([month, count]) => ({ month, count }));
+
+    return [...counts.entries()]
+      .sort()
+      .map(([month, count]) => ({ month, count }));
   }
 
   venueCounts() {
     const counts = new Map();
-    this.records.forEach((record) => counts.set(record.venue, (counts.get(record.venue) || 0) + 1));
-    return [...counts.entries()].map(([venue, count]) => ({ venue, count })).sort((a, b) => b.count - a.count);
+
+    this.records.forEach((record) => {
+      const venue = record.venue || "Unknown";
+      counts.set(venue, (counts.get(venue) || 0) + 1);
+    });
+
+    return [...counts.entries()]
+      .map(([venue, count]) => ({ venue, count }))
+      .sort((a, b) => b.count - a.count);
   }
 
   repertoireConcentration(limit = 5) {
     const plays = this.songPlayCounts();
-    const topCount = plays.slice(0, limit).reduce((sum, song) => sum + song.count, 0);
-    return this.records.length ? Math.round((topCount / this.records.length) * 1000) / 10 : 0;
-  }
+    const topCount = plays
+      .slice(0, limit)
+      .reduce((sum, song) => sum + song.count, 0);
 
-  songRotationStatuses() {
-    if (!this.records.length) return [];
-    const latestDate = this.records.reduce((latest, record) => record.gigDate > latest ? record.gigDate : latest, "");
-    const latestTime = Date.parse(`${latestDate}T00:00:00Z`);
-    const lastPlayed = new Map();
-    this.records.forEach((record) => {
-      const key = record.songTitle.toLowerCase();
-      const current = lastPlayed.get(key);
-      if (!current || record.gigDate > current.lastPlayed) {
-        lastPlayed.set(key, { title: record.songTitle, lastPlayed: record.gigDate });
-      }
-    });
-
-    return [...lastPlayed.values()].map((song) => {
-      const daysSinceLastPlayed = Math.round(
-        (latestTime - Date.parse(`${song.lastPlayed}T00:00:00Z`)) / 86_400_000,
-      );
-      const rotationStatus = daysSinceLastPlayed <= 30
-        ? "Active"
-        : daysSinceLastPlayed <= 90 ? "Cooling Off" : "Stale";
-      return { ...song, daysSinceLastPlayed, rotationStatus };
-    });
+    return this.records.length
+      ? Math.round((topCount / this.records.length) * 1000) / 10
+      : 0;
   }
 
   staleSongs(days = 90) {
-    return this.songRotationStatuses()
-      .filter((song) => song.daysSinceLastPlayed > days)
-      .map(({ title, lastPlayed }) => ({ title, lastPlayed }))
+    if (!this.records.length) return [];
+
+    const datedRecords = this.records.filter(
+      (record) => record.gigDate && record.songTitle
+    );
+
+    if (!datedRecords.length) return [];
+
+    const latestDate = datedRecords.reduce(
+      (latest, record) => (record.gigDate > latest ? record.gigDate : latest),
+      ""
+    );
+
+    const cutoff = new Date(`${latestDate}T00:00:00`);
+    cutoff.setDate(cutoff.getDate() - days);
+
+    const lastPlayed = new Map();
+
+    datedRecords.forEach((record) => {
+      const current = lastPlayed.get(record.songTitle);
+      if (!current || record.gigDate > current) {
+        lastPlayed.set(record.songTitle, record.gigDate);
+      }
+    });
+
+    return [...lastPlayed.entries()]
+      .filter(([, date]) => new Date(`${date}T00:00:00`) < cutoff)
+      .map(([title, date]) => ({ title, lastPlayed: date }))
       .sort((a, b) => a.lastPlayed.localeCompare(b.lastPlayed));
   }
 
   originalsGoalProgress(goal) {
-    const original = this.classificationBreakdown().find((item) => item.name === "original");
-    return { current: original?.percent || 0, goal, met: (original?.percent || 0) >= goal };
+    const original = this.classificationBreakdown().find(
+      (item) => item.name === "original"
+    );
+
+    return {
+      current: original?.percent || 0,
+      goal,
+      met: (original?.percent || 0) >= goal,
+    };
   }
 }
