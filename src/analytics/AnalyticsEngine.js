@@ -54,19 +54,34 @@ export class AnalyticsEngine {
     return this.records.length ? Math.round((topCount / this.records.length) * 1000) / 10 : 0;
   }
 
-  staleSongs(days = 90) {
+  songRotationStatuses() {
     if (!this.records.length) return [];
     const latestDate = this.records.reduce((latest, record) => record.gigDate > latest ? record.gigDate : latest, "");
-    const cutoff = new Date(`${latestDate}T00:00:00`);
-    cutoff.setDate(cutoff.getDate() - days);
+    const latestTime = Date.parse(`${latestDate}T00:00:00Z`);
     const lastPlayed = new Map();
     this.records.forEach((record) => {
-      const current = lastPlayed.get(record.songTitle);
-      if (!current || record.gigDate > current) lastPlayed.set(record.songTitle, record.gigDate);
+      const key = record.songTitle.toLowerCase();
+      const current = lastPlayed.get(key);
+      if (!current || record.gigDate > current.lastPlayed) {
+        lastPlayed.set(key, { title: record.songTitle, lastPlayed: record.gigDate });
+      }
     });
-    return [...lastPlayed.entries()]
-      .filter(([, date]) => new Date(`${date}T00:00:00`) < cutoff)
-      .map(([title, date]) => ({ title, lastPlayed: date }))
+
+    return [...lastPlayed.values()].map((song) => {
+      const daysSinceLastPlayed = Math.round(
+        (latestTime - Date.parse(`${song.lastPlayed}T00:00:00Z`)) / 86_400_000,
+      );
+      const rotationStatus = daysSinceLastPlayed <= 30
+        ? "Active"
+        : daysSinceLastPlayed <= 90 ? "Cooling Off" : "Stale";
+      return { ...song, daysSinceLastPlayed, rotationStatus };
+    });
+  }
+
+  staleSongs(days = 90) {
+    return this.songRotationStatuses()
+      .filter((song) => song.daysSinceLastPlayed > days)
+      .map(({ title, lastPlayed }) => ({ title, lastPlayed }))
       .sort((a, b) => a.lastPlayed.localeCompare(b.lastPlayed));
   }
 

@@ -6,8 +6,8 @@ export function SongTable({ songs }) {
   return (
     <div className="table-wrap">
       <table>
-        <thead><tr><th><button onClick={() => setSort("title")}>Song</button></th><th>Song artist</th><th className="number"><button onClick={() => setSort("count")}>Performances</button></th></tr></thead>
-        <tbody>{sorted.map((song) => <tr key={`${song.title}-${song.artist}`}><td>{song.title}</td><td>{song.artist}</td><td className="number">{song.count}</td></tr>)}</tbody>
+        <thead><tr><th><button onClick={() => setSort("title")}>Song</button></th><th>Song artist</th><th>Rotation status</th><th className="number"><button onClick={() => setSort("count")}>Performances</button></th></tr></thead>
+        <tbody>{sorted.map((song) => <tr key={`${song.title}-${song.artist}`}><td>{song.title}</td><td>{song.artist}</td><td><span className={`rotation-status rotation-status--${song.rotationStatus.toLowerCase().replaceAll(" ", "-")}`}>{song.rotationStatus}</span></td><td className="number">{song.count}</td></tr>)}</tbody>
       </table>
     </div>
   );

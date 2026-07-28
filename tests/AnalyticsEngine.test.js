@@ -32,4 +32,21 @@ describe("AnalyticsEngine", () => {
     expect(analytics.originalsGoalProgress(40)).toEqual({ current: 50, goal: 40, met: true });
     expect(analytics.staleSongs(60).map((song) => song.title)).toEqual(["Cover Song", "Home Song"]);
   });
+
+  it("classifies exact 30-day and 90-day rotation boundaries relative to the latest gig", () => {
+    const boundaryAnalytics = new AnalyticsEngine([
+      { songTitle: "Latest", gigDate: "2026-04-01" },
+      { songTitle: "Thirty Days", gigDate: "2026-03-02" },
+      { songTitle: "Ninety Days", gigDate: "2026-01-01" },
+      { songTitle: "Ninety One Days", gigDate: "2025-12-31" },
+    ]);
+
+    expect(boundaryAnalytics.songRotationStatuses()).toEqual([
+      { title: "Latest", lastPlayed: "2026-04-01", daysSinceLastPlayed: 0, rotationStatus: "Active" },
+      { title: "Thirty Days", lastPlayed: "2026-03-02", daysSinceLastPlayed: 30, rotationStatus: "Active" },
+      { title: "Ninety Days", lastPlayed: "2026-01-01", daysSinceLastPlayed: 90, rotationStatus: "Cooling Off" },
+      { title: "Ninety One Days", lastPlayed: "2025-12-31", daysSinceLastPlayed: 91, rotationStatus: "Stale" },
+    ]);
+    expect(boundaryAnalytics.staleSongs(90).map((song) => song.title)).toEqual(["Ninety One Days"]);
+  });
 });
